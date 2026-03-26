@@ -1,0 +1,57 @@
+services:
+
+  # ── Agent 1: Job Scout (port 8080) ──
+  agent1:
+    build: ./agent1_scout
+    ports:
+      - "8080:8080"
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - SERPAPI_API_KEY=${SERPAPI_API_KEY}
+    restart: unless-stopped
+
+  # ── Agent 2: Interview Prep (port 8081) ──
+  agent2:
+    build: ./agent2_questions
+    ports:
+      - "8081:8081"
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+    restart: unless-stopped
+
+  # ── Module A: Vector DB (port 8000) ──
+  module-a:
+    build: ./module_a_vectordb
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  # ── Module D: LangGraph Orchestrator (port 8082) ──
+  module-d:
+    build: ./module_d_langgraph
+    ports:
+      - "8082:8082"
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - SERPAPI_API_KEY=${SERPAPI_API_KEY}
+      # Point to container service names instead of localhost
+      - AGENT1_URL=http://agent1:8080
+      - MODULE_A_URL=http://module-a:8000
+      - AGENT2_URL=http://agent2:8081
+    depends_on:
+      - agent1
+      - agent2
+      - module-a
+    restart: unless-stopped
+
+  # ── Frontend: Streamlit UI (port 8501) ──
+  frontend:
+    build: ./frontend_ui
+    ports:
+      - "8501:8501"
+    environment:
+      # Frontend calls Module D orchestrator
+      - PIPELINE_URL=http://module-d:8082
+    depends_on:
+      - module-d
+    restart: unless-stopped

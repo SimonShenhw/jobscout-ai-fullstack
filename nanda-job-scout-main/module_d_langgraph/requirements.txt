@@ -1,0 +1,13 @@
+# ── Web framework ──────────────────────────────────────────
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+
+# ── LangGraph orchestration ───────────────────────────────
+langgraph>=0.2.0
+langchain-core>=0.2.0
+
+# ── Async HTTP client (calls Agent 1 / Module A / Agent 2) ─
+httpx>=0.27.0
+
+# ── Data validation ────────────────────────────────────────
+pydantic>=2.7.0
