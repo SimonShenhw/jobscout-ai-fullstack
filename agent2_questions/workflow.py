@@ -7,7 +7,8 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
-# Resume parsing dependencies
+# [ZH] 简历解析依赖
+# [EN] Resume parsing dependencies
 import pdfplumber                          # pip install pdfplumber
 from docx import Document as DocxDocument  # pip install python-docx
 import io
@@ -31,9 +32,10 @@ logger = logging.getLogger("agent2")
 
 
 # ==========================================
+# 1. 数据结构 (A2A 通信协议)
 # 1. Data Structures (A2A Protocol)
-#    Mirrors Agent 1's ScoutResponse schema
-#    so the JSON output slots in directly.
+#    [ZH] 与 Agent 1 的 ScoutResponse 模式对齐，实现 JSON 直传
+#    [EN] Mirrors Agent 1's ScoutResponse schema for seamless A2A communication
 # ==========================================
 
 class JobJD(BaseModel):
@@ -66,12 +68,14 @@ class BatchInterviewPrepResponse(BaseModel):
 
 
 # ==========================================
+# 2. 简历解析工具
 # 2. Resume Parsing Utilities
-#    Supports .pdf, .docx, and .txt formats.
+#    [ZH] 支持 .pdf、.docx 和 .txt 格式
+#    [EN] Supports .pdf, .docx, and .txt formats
 # ==========================================
 
 def _parse_pdf(data: bytes) -> str:
-    """Extract plain text from a PDF file using pdfplumber."""
+    """[ZH] 使用 pdfplumber 从 PDF 提取纯文本 / [EN] Extract plain text from a PDF file using pdfplumber."""
     text_parts = []
     with pdfplumber.open(io.BytesIO(data)) as pdf:
         for page in pdf.pages:
@@ -82,13 +86,13 @@ def _parse_pdf(data: bytes) -> str:
 
 
 def _parse_docx(data: bytes) -> str:
-    """Extract plain text from a .docx file."""
+    """[ZH] 从 .docx 文件提取纯文本 / [EN] Extract plain text from a .docx file."""
     doc = DocxDocument(io.BytesIO(data))
     return "\n".join(p.text for p in doc.paragraphs if p.text.strip()).strip()
 
 
 def _parse_txt(data: bytes) -> str:
-    """Decode a plain-text resume; try UTF-8, fall back to latin-1."""
+    """[ZH] 解码纯文本简历，优先 UTF-8，回退 latin-1 / [EN] Decode a plain-text resume; try UTF-8, fall back to latin-1."""
     try:
         return data.decode("utf-8").strip()
     except UnicodeDecodeError:
@@ -97,7 +101,8 @@ def _parse_txt(data: bytes) -> str:
 
 def extract_resume_text(filename: str, data: bytes) -> str:
     """
-    Dispatch to the correct parser based on file extension.
+    [ZH] 根据文件扩展名分派到对应解析器。不支持的格式抛出 ValueError。
+    [EN] Dispatch to the correct parser based on file extension.
     Raises ValueError for unsupported formats so FastAPI can surface a clean 400.
     """
     ext = filename.rsplit(".", 1)[-1].lower()
@@ -112,6 +117,7 @@ def extract_resume_text(filename: str, data: bytes) -> str:
 
 
 # ==========================================
+# 3. 模块级 LLM + Prompt（初始化一次，复用于所有请求）
 # 3. Module-Level LLM + Prompt (initialized once, reused across requests)
 # ==========================================
 
@@ -149,9 +155,8 @@ CHAIN = PROMPT | LLM.with_structured_output(InterviewPrepResponse)
 
 
 # ==========================================
-# 4. Core Agent Logic
-#    One coroutine per job — runs concurrently
-#    via asyncio.gather() for low latency.
+# 4. 核心 Agent 逻辑（每个岗位一个协程，asyncio.gather 并发执行）
+# 4. Core Agent Logic (one coroutine per job, concurrent via asyncio.gather)
 # ==========================================
 
 async def generate_questions_for_job(
@@ -159,7 +164,8 @@ async def generate_questions_for_job(
     resume_text: str,
 ) -> InterviewPrepResponse:
     """
-    Generate 3 tailored interview questions for a single job.
+    [ZH] 为单个岗位生成 3 道定制面试题。LLM 解析失败最多重试 3 次。
+    [EN] Generate 3 tailored interview questions for a single job.
     Retries up to 3 times on LLM parse failure (mirrors Agent 1's pattern).
     """
     max_retries = 3
@@ -187,17 +193,18 @@ async def run_interview_agent(
     resume_text: str,
 ) -> BatchInterviewPrepResponse:
     """
-    Entry point: concurrently processes every job from Agent 1's output.
+    [ZH] 入口：并发处理 Agent 1 输出的所有岗位。
+    [EN] Entry point: concurrently processes every job from Agent 1's output.
     """
     if not os.getenv("GOOGLE_API_KEY"):
         raise ValueError("Missing GOOGLE_API_KEY environment variable.")
 
-    # --- Fan-out: run all jobs concurrently ---
+    # [ZH] 扇出：并发处理所有岗位 / [EN] Fan-out: run all jobs concurrently
     logger.info(f"Processing {len(jobs)} job(s) concurrently...")
     tasks = [generate_questions_for_job(job, resume_text) for job in jobs]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Separate successes from failures — never let one bad job kill the batch
+    # [ZH] 分离成功与失败 — 单个岗位失败不影响整批 / [EN] Separate successes from failures — never let one bad job kill the batch
     successful: List[InterviewPrepResponse] = []
     for job, result in zip(jobs, results):
         if isinstance(result, Exception):
@@ -212,7 +219,8 @@ async def run_interview_agent(
 
 
 # ==========================================
-# 4. FastAPI Deployment Shell
+# 5. 部署外壳 (FastAPI 封装)
+# 5. Deployment Shell (FastAPI Wrapper)
 # ==========================================
 
 app = FastAPI(
@@ -245,7 +253,7 @@ async def api_generate_interview_questions(
         )
     ),
 ):
-    # --- 1. Parse resume ---
+    # [ZH] 1. 解析简历 / [EN] 1. Parse resume
     try:
         resume_bytes = await resume.read()
         resume_text = extract_resume_text(resume.filename, resume_bytes)
@@ -257,7 +265,7 @@ async def api_generate_interview_questions(
     if not resume_text:
         raise HTTPException(status_code=422, detail="Resume appears to be empty or unreadable.")
 
-    # --- 2. Parse Agent 1 JSON (flexible: full object OR bare array) ---
+    # [ZH] 2. 解析 Agent 1 的 JSON（兼容完整对象或纯数组）/ [EN] 2. Parse Agent 1 JSON (flexible: full object OR bare array)
     try:
         parsed = json.loads(jobs_json)
         # Accept both {"status": ..., "jobs": [...]} and plain [...]
@@ -269,7 +277,7 @@ async def api_generate_interview_questions(
     if not jobs:
         raise HTTPException(status_code=400, detail="No jobs found in jobs_json.")
 
-    # --- 3. Run the agent ---
+    # [ZH] 3. 运行 Agent / [EN] 3. Run the agent
     try:
         response = await run_interview_agent(jobs, resume_text)
         return response
@@ -278,9 +286,8 @@ async def api_generate_interview_questions(
 
 
 # ==========================================
-# 5b. JSON-body endpoint (for Module D / Frontend)
-#     [ZH] JSON 格式的接口，供 Module D 和前端使用
-#     [EN] JSON-body endpoint for Module D and frontend
+# 6. JSON 格式接口（供 Module D 和前端使用）
+# 6. JSON-body Endpoint (for Module D / Frontend)
 # ==========================================
 
 class PrepJsonRequest(BaseModel):
@@ -315,7 +322,7 @@ async def api_generate_interview_questions_json(request: PrepJsonRequest):
 
 
 # ==========================================
-# 6. Health Check
+# 7. 健康检查 / Health Check
 # ==========================================
 
 @app.get("/health", tags=["Ops"])

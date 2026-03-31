@@ -3,16 +3,19 @@ import requests
 import time
 
 
-# Service URL — points to Module D orchestrator
+# [ZH] 服务地址 — 指向 Module D 编排器
+# [EN] Service URL — points to Module D orchestrator
 PIPELINE_URL = os.getenv("PIPELINE_URL", "http://127.0.0.1:8082")
 
-# Retry settings
+# [ZH] 重试设置 / [EN] Retry settings
 MAX_RETRIES = 3
-RETRY_DELAY = 2  # seconds
+RETRY_DELAY = 2  # [ZH] 秒 / [EN] seconds
 
 
 def _request_with_retry(method: str, url: str, payload: dict, timeout: int = 30) -> dict:
     """
+    [ZH] 通用请求处理器，带重试逻辑和友好错误信息。
+    [EN]
     Generic request handler with retry logic and detailed error messages.
     """
     last_error = None
@@ -59,16 +62,17 @@ def _request_with_retry(method: str, url: str, payload: dict, timeout: int = 30)
             last_error = str(e)
             break
 
+    # [ZH] 将错误类型映射为用户友好消息 / [EN] Map error types to user-friendly messages
     error_messages = {
-        "connection_error": "Cannot reach the server. It may not be deployed yet — using demo data.",
-        "timeout": "Server took too long to respond. Please try again.",
-        "rate_limit": "Too many requests. Please wait a moment and try again.",
-        "server_error": "The server encountered an error. Please try again later.",
+        "connection_error": "无法连接服务器，使用演示数据 / Cannot reach the server — using demo data.",
+        "timeout": "服务器响应超时，请重试 / Server took too long to respond. Please try again.",
+        "rate_limit": "请求过于频繁，请稍后重试 / Too many requests. Please wait a moment.",
+        "server_error": "服务器内部错误，请稍后重试 / Server error. Please try again later.",
     }
 
     friendly_msg = error_messages.get(
         last_error,
-        f"An unexpected error occurred: {last_error}",
+        f"发生未知错误 / An unexpected error occurred: {last_error}",
     )
 
     return {"status": "error", "error_type": last_error, "message": friendly_msg}
@@ -76,9 +80,11 @@ def _request_with_retry(method: str, url: str, payload: dict, timeout: int = 30)
 
 def run_pipeline(location: str, keywords: str, num_results: int, resume_text: str = "") -> dict:
     """
-    Send a unified request to Module D (LangGraph orchestrator).
-    Returns jobs, resume_tips, and interview_prep in one call.
-    Falls back to mock data if the server is not available.
+    [ZH] 向 Module D（LangGraph 编排器）发送统一请求。一次调用返回岗位、简历建议和面试题。
+         服务不可用时回退到演示数据。
+    [EN] Send a unified request to Module D (LangGraph orchestrator).
+         Returns jobs, resume_tips, and interview_prep in one call.
+         Falls back to mock data if the server is not available.
     """
     result = _request_with_retry(
         method="POST",
@@ -103,7 +109,7 @@ def run_pipeline(location: str, keywords: str, num_results: int, resume_text: st
             "is_live": True,
         }
 
-    # Fall back to mock data if server is unreachable
+    # [ZH] 服务不可达时回退到演示数据 / [EN] Fall back to mock data if server is unreachable
     if result.get("error_type") == "connection_error":
         mock = _mock_pipeline_response(num_results)
         mock["is_live"] = False
@@ -121,7 +127,8 @@ def run_pipeline(location: str, keywords: str, num_results: int, resume_text: st
 
 
 # ==============================================
-# Mock data for development (remove when APIs are live)
+# [ZH] 开发用演示数据（API 上线后可移除）
+# [EN] Mock data for development (remove when APIs are live)
 # ==============================================
 
 def _mock_pipeline_response(num_results: int) -> dict:
