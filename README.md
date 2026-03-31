@@ -64,7 +64,12 @@ Module D orchestrates the full pipeline: **Agent 1** and **Module A / Agent 2** 
    python build_db.py
    ```
 
-4. Double-click `run_all.bat` or start services manually:
+4. (Windows + Python 3.14 only) Fix aiohttp DNS issue:
+   ```bash
+   pip uninstall aiodns -y
+   ```
+
+5. Double-click `run_all.bat` or start services manually:
    ```bash
    cd agent1_scout && python main.py        # port 8080
    cd agent2_questions && python workflow.py # port 8081
@@ -73,7 +78,9 @@ Module D orchestrates the full pipeline: **Agent 1** and **Module A / Agent 2** 
    cd frontend_ui && streamlit run app.py   # port 8501
    ```
 
-5. Open http://localhost:8501
+6. Open http://localhost:8501
+
+To stop all services, press any key in the `run_all.bat` window, or double-click `stop_all.bat`.
 
 ### Option 2: Docker Compose
 
@@ -122,6 +129,7 @@ curl -X POST http://localhost:8080/api/v1/scout \
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/v1/search` | Semantic search for resume tips |
+| GET | `/health` | Health check |
 
 ### Module D — Orchestrator
 | Method | Endpoint | Description |
@@ -167,7 +175,8 @@ curl -X POST http://localhost:8080/api/v1/scout \
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── docker-compose.yml      # Full-stack orchestration
-├── run_all.bat             # Windows one-click launcher
+├── run_all.bat             # Windows one-click launcher (press any key to stop all)
+├── stop_all.bat            # Standalone service shutdown script
 └── .env                    # API keys (not tracked by git)
 ```
 
