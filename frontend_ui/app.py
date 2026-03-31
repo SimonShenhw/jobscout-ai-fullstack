@@ -15,7 +15,9 @@ st.set_page_config(
 # ==============================================
 # Load custom CSS
 # ==============================================
-with open("style.css", encoding="utf-8") as f:
+import os as _os
+_css_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "style.css")
+with open(_css_path, encoding="utf-8") as f:
     st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
 # ==============================================

@@ -16,6 +16,7 @@ from cachetools import TTLCache
 if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
     sys.stdout.reconfigure(encoding='utf-8')
 
+
 # [ZH] 配置日志格式（替代 print，带时间戳和级别）
 # [EN] Configure structured logging (replaces print, adds timestamp and level)
 logging.basicConfig(

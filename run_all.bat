@@ -39,5 +39,14 @@ echo   All services started!
 echo   Open http://localhost:8501 in your browser
 echo ============================================
 echo.
-echo Press any key to close this window...
+echo Press any key to STOP all services and exit...
 pause >nul
+
+echo.
+echo Stopping all services...
+taskkill /FI "WINDOWTITLE eq Agent 1 - Scout*" /F >nul 2>&1
+taskkill /FI "WINDOWTITLE eq Agent 2 - Questions*" /F >nul 2>&1
+taskkill /FI "WINDOWTITLE eq Module A - VectorDB*" /F >nul 2>&1
+taskkill /FI "WINDOWTITLE eq Module D - LangGraph*" /F >nul 2>&1
+taskkill /FI "WINDOWTITLE eq Frontend UI*" /F >nul 2>&1
+echo [OK] All services stopped.
