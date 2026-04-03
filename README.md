@@ -18,15 +18,17 @@ Module D (LangGraph Orchestrator)
     │
     ├──► Agent 1 (Job Scout)        — SerpAPI + Gemini LLM
     ├──► Module A (Vector DB)       — Resume tips via ChromaDB
-    └──► Agent 2 (Interview Prep)   — Gemini LLM question generation
+    ├──► Agent 2 (Interview Prep)   — Gemini LLM question generation
+    └──► Agent B (Cost of Living)   — City cost analysis + Gemini AI insights
 ```
 
-Module D orchestrates the full pipeline: **Agent 1** runs first, then **Module A** and **Agent 2** run in parallel, minimizing total latency.
+Module D orchestrates the full pipeline: **Agent 1** runs first, then **Module A**, **Agent 2**, and **Agent B** run in parallel, minimizing total latency.
 
 | Service | Port | Description |
 |---------|------|-------------|
 | Agent 1 | 8080 | Searches jobs via SerpAPI, structures results with Gemini |
 | Agent 2 | 8081 | Generates tailored interview questions per job + resume |
+| Agent B | 8083 | Evaluates cost of living and salary affordability per city |
 | Module A | 8000 | Vector database for resume tips (ChromaDB + SentenceTransformers) |
 | Module D | 8082 | LangGraph StateGraph orchestrator, chains all agents |
 | Frontend | 8501 | Streamlit web UI with job cards, salary display, interview chat |
@@ -38,6 +40,7 @@ Module D orchestrates the full pipeline: **Agent 1** runs first, then **Module A
 - **Resume Tips** — Vector similarity search against curated tips database
 - **Resume Upload** — PDF/TXT parsing for personalized question generation
 - **Caching** — 10-min TTL cache on Agent 1 to save API quota on repeated searches
+- **Cost of Living** — Agent B evaluates salary affordability per city (Comfortable / Moderate / Tight)
 - **Demo Mode** — Frontend falls back to mock data when backends are unavailable
 
 ### Quick Start
@@ -131,6 +134,13 @@ curl -X POST http://localhost:8080/api/v1/scout \
 | POST | `/api/v1/prep` | Generate interview questions (multipart form) |
 | GET | `/health` | Health check |
 
+#### Agent B — Cost of Living
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/v1/evaluate` | Evaluate cost of living for a job + city |
+| GET | `/api/v1/cities` | List supported cities |
+| GET | `/health` | Health check |
+
 #### Module A — Vector DB
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -163,6 +173,12 @@ curl -X POST http://localhost:8080/api/v1/scout \
 │   └── docker-compose.yml  # Standalone deployment
 ├── agent2_questions/       # Agent 2: Interview prep
 │   ├── workflow.py
+│   ├── requirements.txt
+│   └── Dockerfile
+├── agent_b_cost/           # Agent B: Cost of living calculator
+│   ├── main.py
+│   ├── agent.py
+│   ├── tools.py
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── module_a_vectordb/      # Module A: Resume tips vector DB
@@ -206,15 +222,17 @@ Module D (LangGraph 编排器)
     │
     ├──► Agent 1 (岗位搜索)       — SerpAPI + Gemini LLM
     ├──► Module A (向量数据库)     — 基于 ChromaDB 的简历建议
-    └──► Agent 2 (面试准备)       — Gemini LLM 生成面试题
+    ├──► Agent 2 (面试准备)       — Gemini LLM 生成面试题
+    └──► Agent B (生活成本)       — 城市生活成本分析 + Gemini AI 洞察
 ```
 
-Module D 编排完整流水线：**Agent 1** 先执行搜索，随后 **Module A** 和 **Agent 2** 并行执行，最大限度降低总延迟。
+Module D 编排完整流水线：**Agent 1** 先执行搜索，随后 **Module A**、**Agent 2** 和 **Agent B** 三者并行执行，最大限度降低总延迟。
 
 | 服务 | 端口 | 说明 |
 |------|------|------|
 | Agent 1 | 8080 | 通过 SerpAPI 搜索岗位，使用 Gemini 结构化解析结果 |
 | Agent 2 | 8081 | 根据岗位 + 简历生成定制面试题 |
+| Agent B | 8083 | 评估各城市生活成本及薪资负担能力 |
 | Module A | 8000 | 简历建议向量数据库（ChromaDB + SentenceTransformers）|
 | Module D | 8082 | LangGraph StateGraph 编排器，串联所有 Agent |
 | 前端 | 8501 | Streamlit Web 界面，含岗位卡片、薪资显示、面试聊天 |
@@ -226,6 +244,7 @@ Module D 编排完整流水线：**Agent 1** 先执行搜索，随后 **Module A
 - **简历建议** — 基于向量相似度匹配的简历优化建议
 - **简历上传** — 支持 PDF/TXT 解析，用于个性化面试题生成
 - **缓存机制** — Agent 1 内置 10 分钟 TTL 缓存，节省 API 配额
+- **生活成本** — Agent B 评估各城市薪资负担能力（舒适 / 适中 / 紧张）
 - **演示模式** — 后端不可用时自动切换到演示数据
 
 ### 快速开始
@@ -319,6 +338,13 @@ curl -X POST http://localhost:8080/api/v1/scout \
 | POST | `/api/v1/prep` | 生成面试题（表单上传）|
 | GET | `/health` | 健康检查 |
 
+#### Agent B — 生活成本
+| 方法 | 接口 | 说明 |
+|------|------|------|
+| POST | `/api/v1/evaluate` | 评估岗位 + 城市的生活成本 |
+| GET | `/api/v1/cities` | 返回支持的城市列表 |
+| GET | `/health` | 健康检查 |
+
 #### Module A — 向量数据库
 | 方法 | 接口 | 说明 |
 |------|------|------|
@@ -351,6 +377,12 @@ curl -X POST http://localhost:8080/api/v1/scout \
 │   └── docker-compose.yml  # 独立部署配置
 ├── agent2_questions/       # Agent 2：面试准备
 │   ├── workflow.py
+│   ├── requirements.txt
+│   └── Dockerfile
+├── agent_b_cost/           # Agent B：生活成本计算器
+│   ├── main.py
+│   ├── agent.py
+│   ├── tools.py
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── module_a_vectordb/      # Module A：简历建议向量数据库

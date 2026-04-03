@@ -105,6 +105,7 @@ def run_pipeline(location: str, keywords: str, num_results: int, resume_text: st
             "jobs": data.get("jobs", []),
             "resume_tips": data.get("resume_tips", []),
             "interview_prep": data.get("interview_prep", []),
+            "cost_of_living": data.get("cost_of_living", []),
             "errors": data.get("errors", []),
             "is_live": True,
         }

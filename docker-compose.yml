@@ -26,6 +26,15 @@ services:
       - "8000:8000"
     restart: unless-stopped
 
+  # ── Agent B: Cost of Living Calculator (port 8083) ──
+  agent-b:
+    build: ./agent_b_cost
+    ports:
+      - "8083:8083"
+    environment:
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+    restart: unless-stopped
+
   # ── Module D: LangGraph Orchestrator (port 8082) ──
   module-d:
     build: ./module_d_langgraph
@@ -34,14 +43,16 @@ services:
     environment:
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - SERPAPI_API_KEY=${SERPAPI_API_KEY}
-      # Point to container service names instead of localhost
+      # [ZH] 指向容器服务名 / [EN] Point to container service names
       - AGENT1_URL=http://agent1:8080
       - MODULE_A_URL=http://module-a:8000
       - AGENT2_URL=http://agent2:8081
+      - AGENT_B_URL=http://agent-b:8083
     depends_on:
       - agent1
       - agent2
       - module-a
+      - agent-b
     restart: unless-stopped
 
   # ── Frontend: Streamlit UI (port 8501) ──

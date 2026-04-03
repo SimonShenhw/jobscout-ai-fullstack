@@ -31,6 +31,8 @@ if "interview_prep" not in st.session_state:
     st.session_state.interview_prep = []
 if "resume_tips" not in st.session_state:
     st.session_state.resume_tips = []
+if "cost_of_living" not in st.session_state:
+    st.session_state.cost_of_living = []
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "resume_text" not in st.session_state:
@@ -153,6 +155,7 @@ if scout_button:
             st.session_state.jobs = result["jobs"]
             st.session_state.resume_tips = result.get("resume_tips", [])
             st.session_state.interview_prep = result.get("interview_prep", [])
+            st.session_state.cost_of_living = result.get("cost_of_living", [])
             st.session_state.is_live = result.get("is_live", False)
             st.session_state.selected_job = None
             st.session_state.chat_history = []
@@ -205,6 +208,39 @@ if st.session_state.jobs:
                 else "<span class='salary-badge salary-na'>Not Specified</span>"
             )
 
+            # [ZH] 查找对应的生活成本评估 / [EN] Find matching cost of living evaluation
+            cost_html = ""
+            for col in st.session_state.cost_of_living:
+                if (col.get("company") == job.get("company")
+                        and col.get("job_title") == job.get("job_title")):
+                    aff = col.get("affordability", "")
+                    if "Comfortable" in aff:
+                        aff_color, aff_bg = "#065F46", "#ECFDF5"
+                    elif "Moderate" in aff:
+                        aff_color, aff_bg = "#92400E", "#FEF3C7"
+                    elif "Tight" in aff:
+                        aff_color, aff_bg = "#991B1B", "#FEE2E2"
+                    else:
+                        aff_color, aff_bg = "#6B7280", "#F3F4F6"
+                    ai_comment = col.get("ai_comment", "")
+                    monthly_cost = col.get("monthly_cost_range", "")
+                    monthly_surplus = col.get("monthly_surplus_range", "")
+                    details = []
+                    if monthly_cost:
+                        details.append(f"Monthly Cost: {monthly_cost}")
+                    if monthly_surplus:
+                        details.append(f"Surplus: {monthly_surplus}")
+                    details_str = " | ".join(details)
+                    cost_html = (
+                        f"<div style='margin:6px 0; padding:8px 12px; background:{aff_bg};"
+                        f" border-radius:8px; font-size:0.82rem; color:{aff_color};'>"
+                        f"<strong>Cost of Living:</strong> {aff}"
+                        f"{f' ({details_str})' if details_str else ''}"
+                        f"{f'<br><em>{ai_comment}</em>' if ai_comment else ''}"
+                        f"</div>"
+                    )
+                    break
+
             st.markdown(
                 f"""
                 <div style='background:white; border:1px solid #E5E7EB;
@@ -228,6 +264,7 @@ if st.session_state.jobs:
                         </a>
                     </div>
                     <div style='margin:8px 0 6px;'>{salary_html}</div>
+                    {cost_html}
                     <p style='margin:6px 0 8px; color:#555;
                         font-size:0.88rem;'>{job.get("summary", "")}</p>
                     <div>{badges}</div>

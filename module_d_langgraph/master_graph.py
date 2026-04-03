@@ -5,11 +5,12 @@ Uses LangGraph StateGraph to route data between:
   - Agent 1 (Job Scout,      port 8080)
   - Module A (VectorDB Tips, port 8000)
   - Agent 2 (Interview Prep, port 8081)
+  - Agent B (Cost of Living, port 8083)
 
 Exposes its own FastAPI server on port 8082.
 
-[ZH] 使用 LangGraph 状态图将 Agent 1、Module A、Agent 2 串联为完整流水线。
-[EN] Uses LangGraph StateGraph to chain Agent 1, Module A, Agent 2 into a full pipeline.
+[ZH] 使用 LangGraph 状态图将 Agent 1、Module A、Agent 2、Agent B 串联为完整流水线。
+[EN] Uses LangGraph StateGraph to chain Agent 1, Module A, Agent 2, Agent B into a full pipeline.
 """
 
 import os
@@ -43,6 +44,7 @@ logger = logging.getLogger("module_d")
 AGENT1_URL = os.getenv("AGENT1_URL", "http://127.0.0.1:8080")
 MODULE_A_URL = os.getenv("MODULE_A_URL", "http://127.0.0.1:8000")
 AGENT2_URL = os.getenv("AGENT2_URL", "http://127.0.0.1:8081")
+AGENT_B_URL = os.getenv("AGENT_B_URL", "http://127.0.0.1:8083")
 
 
 # ==================================================
@@ -63,6 +65,7 @@ class PipelineResponse(BaseModel):
     jobs: list = Field(default_factory=list)
     resume_tips: list = Field(default_factory=list)
     interview_prep: list = Field(default_factory=list)
+    cost_of_living: list = Field(default_factory=list, description="[ZH] Agent B 生活成本评估 / [EN] Agent B cost of living evaluations")
     errors: list = Field(default_factory=list, description="Non-fatal errors encountered during pipeline")
 
 
@@ -84,6 +87,7 @@ class PipelineState(TypedDict):
     jobs: list
     resume_tips: list
     interview_prep: list
+    cost_of_living: list
     errors: list
 
 
@@ -191,6 +195,59 @@ async def generate_questions(state: PipelineState) -> dict:
         return {"interview_prep": [], "errors": state.get("errors", []) + [error_msg]}
 
 
+async def evaluate_cost(state: PipelineState) -> dict:
+    """
+    Node 4: Call Agent B to evaluate cost of living for each job.
+    [ZH] 节点 4：调用 Agent B 为每个岗位评估生活成本。
+    """
+    logger.info("[Node: evaluate_cost] Calling Agent B...")
+
+    jobs = state.get("jobs", [])
+    if not jobs:
+        logger.warning("[Node: evaluate_cost] No jobs to evaluate, skipping.")
+        return {"cost_of_living": []}
+
+    results = []
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            for job in jobs:
+                try:
+                    resp = await client.post(
+                        f"{AGENT_B_URL}/api/v1/evaluate",
+                        json={
+                            "job_title": job.get("job_title", ""),
+                            "location": state.get("location", "Boston"),
+                            "estimated_salary": job.get("estimated_salary", "Not Specified"),
+                        },
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    results.append({
+                        "company": job.get("company", ""),
+                        "job_title": job.get("job_title", ""),
+                        "affordability": data.get("affordability", "Unknown"),
+                        "monthly_cost_range": data.get("monthly_cost_range", ""),
+                        "monthly_surplus_range": data.get("monthly_surplus_range", ""),
+                        "ai_comment": data.get("ai_comment", ""),
+                    })
+                except Exception as e:
+                    logger.warning(f"[Node: evaluate_cost] Failed for {job.get('job_title', '?')}: {e}")
+                    results.append({
+                        "company": job.get("company", ""),
+                        "job_title": job.get("job_title", ""),
+                        "affordability": "Unavailable",
+                        "monthly_cost_range": "",
+                        "monthly_surplus_range": "",
+                        "ai_comment": "",
+                    })
+        logger.info(f"[Node: evaluate_cost] Evaluated {len(results)} jobs via Agent B.")
+        return {"cost_of_living": results}
+    except Exception as e:
+        error_msg = f"Agent B (evaluate_cost) failed: {e}"
+        logger.error(error_msg)
+        return {"cost_of_living": [], "errors": state.get("errors", []) + [error_msg]}
+
+
 async def merge_results(state: PipelineState) -> dict:
     """
     Node 4: Final merge — no-op, state already holds everything.
@@ -206,24 +263,29 @@ async def merge_results(state: PipelineState) -> dict:
 
 def build_graph() -> StateGraph:
     """
-    [ZH] 构建 LangGraph 状态图：scout → [tips + questions 并行] → merge → END
-    [EN] Build LangGraph state graph: scout → [tips + questions parallel] → merge → END
+    [ZH] 构建 LangGraph 状态图：scout → [tips + questions + cost 并行] → merge → END
+    [EN] Build LangGraph state graph: scout → [tips + questions + cost parallel] → merge → END
     """
     graph = StateGraph(PipelineState)
 
-    # Add nodes
+    # [ZH] 添加节点 / [EN] Add nodes
     graph.add_node("scout_jobs", scout_jobs)
     graph.add_node("retrieve_tips", retrieve_tips)
     graph.add_node("generate_questions", generate_questions)
+    graph.add_node("evaluate_cost", evaluate_cost)
     graph.add_node("merge_results", merge_results)
 
-    # scout_jobs runs first, then retrieve_tips and generate_questions run in PARALLEL,
-    # both fan-in to merge_results before reaching END.
+    # [ZH] scout_jobs 先执行，然后 retrieve_tips、generate_questions、evaluate_cost 三者并行，
+    #      全部完成后汇入 merge_results → END
+    # [EN] scout_jobs runs first, then retrieve_tips, generate_questions, and evaluate_cost
+    #      run in PARALLEL, all fan-in to merge_results before reaching END.
     graph.set_entry_point("scout_jobs")
     graph.add_edge("scout_jobs", "retrieve_tips")
     graph.add_edge("scout_jobs", "generate_questions")
+    graph.add_edge("scout_jobs", "evaluate_cost")
     graph.add_edge("retrieve_tips", "merge_results")
     graph.add_edge("generate_questions", "merge_results")
+    graph.add_edge("evaluate_cost", "merge_results")
     graph.add_edge("merge_results", END)
 
     return graph.compile()
@@ -275,6 +337,7 @@ async def run_pipeline(request: PipelineRequest):
         "jobs": [],
         "resume_tips": [],
         "interview_prep": [],
+        "cost_of_living": [],
         "errors": [],
     }
 
@@ -287,6 +350,7 @@ async def run_pipeline(request: PipelineRequest):
             jobs=final_state.get("jobs", []),
             resume_tips=final_state.get("resume_tips", []),
             interview_prep=final_state.get("interview_prep", []),
+            cost_of_living=final_state.get("cost_of_living", []),
             errors=final_state.get("errors", []),
         )
     except Exception as e:
