@@ -152,7 +152,7 @@ async def run_scout_agent(request: ScoutRequest) -> ScoutResponse:
 
 app = FastAPI(
     title="Job Scout Agent API",
-    description="MIT NANDA Sandbox Project - Group X. Lightning Fast Edition with Caching & Telemetry.",
+    description="MIT NANDA Sandbox Project - Group 1. Lightning Fast Edition with Caching & Telemetry.",
     version="2.3.0"
 )
 
@@ -165,8 +165,8 @@ async def health():
 async def api_scout_jobs(request: ScoutRequest):
     start_time = time.time()
 
-    # [ZH] 构造缓存 Key / [EN] Build cache key
-    cache_key = f"{request.location}_{request.keywords}_{request.num_results}"
+    # [ZH] 构造缓存 Key（用 | 分隔避免冲突）/ [EN] Build cache key (use | separator to avoid collisions)
+    cache_key = f"{request.location}|{request.keywords}|{request.num_results}"
 
     try:
         # [ZH] 命中缓存则秒回 / [EN] Cache hit = instant return
