@@ -1,8 +1,11 @@
 import os
 import sys
 import time
+import json
 import asyncio
 import logging
+from copy import deepcopy
+from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from typing import List
@@ -155,6 +158,27 @@ app = FastAPI(
     description="MIT NANDA Sandbox Project - Group 1. Lightning Fast Edition with Caching & Telemetry.",
     version="2.3.0"
 )
+
+# ==========================================
+# NANDA Agent Card (/.well-known/agent.json)
+# ==========================================
+
+AGENT_CARD_PATH = Path(__file__).with_name("agent.json")
+if AGENT_CARD_PATH.exists():
+    with AGENT_CARD_PATH.open("r", encoding="utf-8") as _acf:
+        AGENT_CARD_TEMPLATE = json.load(_acf)
+
+    def get_agent_card() -> dict:
+        """[ZH] 获取 NANDA Agent 事实卡 / [EN] Get NANDA Agent Fact Card."""
+        card = deepcopy(AGENT_CARD_TEMPLATE)
+        card["url"] = os.getenv("PUBLIC_URL", card.get("url", ""))
+        return card
+
+    @app.get("/.well-known/agent.json", tags=["NANDA"])
+    async def agent_card():
+        """[ZH] NANDA Agent 事实卡 / [EN] Machine-readable metadata for agent discovery."""
+        return get_agent_card()
+
 
 @app.get("/health", tags=["Ops"])
 async def health():
