@@ -6,7 +6,7 @@ from langchain_chroma import Chroma
 # [ZH] 1. 读取简历建议文本文件
 # [EN] 1. Load resume tips text file
 print("1. 正在读取 resume_tips.txt / Loading resume_tips.txt...")
-loader = TextLoader("resume_tips.txt")
+loader = TextLoader("resume_tips.txt", encoding="utf-8")
 documents = loader.load()
 
 # [ZH] 2. 将文本切割为小块，便于向量化检索
