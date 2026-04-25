@@ -1,4 +1,6 @@
+import os
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from langchain.tools import tool
 from langchain_chroma import Chroma
@@ -7,6 +9,16 @@ from langchain_huggingface import HuggingFaceEmbeddings
 # [ZH] 1. 启动 FastAPI
 # [EN] 1. Initialize FastAPI
 app = FastAPI(title="Module A: Vector DB API - Resume Tips")
+
+# [ZH] CORS 中间件 / [EN] CORS middleware
+_origins = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
 
 # [ZH] 2. 连接本地持久化向量数据库
 # [EN] 2. Connect to local persistent vector database

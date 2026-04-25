@@ -16,14 +16,20 @@ Exposes its own FastAPI server on port 8082.
 import os
 import sys
 import json
+import uuid
 import asyncio
 import logging
 from typing import List, Optional, TypedDict, Any
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header, Request
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from langgraph.graph import StateGraph, END
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 # ── Encoding fix for Windows cmd ──
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
@@ -39,12 +45,40 @@ logger = logging.getLogger("module_d")
 
 
 # ==================================================
-# 1. Service URLs (configurable via env vars)
+# 1. 集中式配置（Pydantic Settings）
+# 1. Centralized Settings (Pydantic Settings)
 # ==================================================
-AGENT1_URL = os.getenv("AGENT1_URL", "http://127.0.0.1:8080")
-MODULE_A_URL = os.getenv("MODULE_A_URL", "http://127.0.0.1:8000")
-AGENT2_URL = os.getenv("AGENT2_URL", "http://127.0.0.1:8081")
-AGENT_B_URL = os.getenv("AGENT_B_URL", "http://127.0.0.1:8083")
+
+class Settings(BaseSettings):
+    """[ZH] 集中管理所有配置项 / [EN] Centralized application settings."""
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)
+
+    # [ZH] 服务地址 / [EN] Service URLs
+    agent1_url: str = "http://127.0.0.1:8080"
+    module_a_url: str = "http://127.0.0.1:8000"
+    agent2_url: str = "http://127.0.0.1:8081"
+    agent_b_url: str = "http://127.0.0.1:8083"
+
+    # [ZH] 安全 / [EN] Security
+    api_key: str = ""
+    allowed_origins: str = "*"
+    rate_limit: str = "10/minute"
+
+    # [ZH] LLM / [EN] LLM
+    gemini_model: str = "gemini-2.5-flash"
+
+    # [ZH] 超时（秒）/ [EN] Timeouts (seconds)
+    agent1_timeout: float = 90.0
+    module_a_timeout: float = 30.0
+    agent2_timeout: float = 120.0
+    agent_b_timeout: float = 60.0
+
+
+settings = Settings()
+AGENT1_URL = settings.agent1_url
+MODULE_A_URL = settings.module_a_url
+AGENT2_URL = settings.agent2_url
+AGENT_B_URL = settings.agent_b_url
 
 
 # ==================================================
@@ -102,7 +136,7 @@ async def scout_jobs(state: PipelineState) -> dict:
     """
     logger.info("[Node: scout_jobs] Calling Agent 1...")
     try:
-        async with httpx.AsyncClient(timeout=90.0) as client:
+        async with httpx.AsyncClient(timeout=settings.agent1_timeout) as client:
             resp = await client.post(
                 f"{AGENT1_URL}/api/v1/scout",
                 json={
@@ -141,7 +175,7 @@ async def retrieve_tips(state: PipelineState) -> dict:
         query = f"resume tips for {', '.join(unique_skills)} roles"
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=settings.module_a_timeout) as client:
             resp = await client.post(
                 f"{MODULE_A_URL}/api/v1/search",
                 json={"query": query},
@@ -176,7 +210,7 @@ async def generate_questions(state: PipelineState) -> dict:
         resume_text = "No resume provided."
 
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=settings.agent2_timeout) as client:
             resp = await client.post(
                 f"{AGENT2_URL}/api/v1/prep_json",
                 json={
@@ -197,51 +231,57 @@ async def generate_questions(state: PipelineState) -> dict:
 
 async def evaluate_cost(state: PipelineState) -> dict:
     """
-    Node 4: Call Agent B to evaluate cost of living for each job.
-    [ZH] 节点 4：调用 Agent B 为每个岗位评估生活成本。
+    Node 4: Call Agent B to evaluate cost of living for each job (concurrent).
+    [ZH] 节点 4：并发调用 Agent B 为每个岗位评估生活成本。
     """
-    logger.info("[Node: evaluate_cost] Calling Agent B...")
+    logger.info("[Node: evaluate_cost] Calling Agent B (concurrent)...")
 
     jobs = state.get("jobs", [])
     if not jobs:
         logger.warning("[Node: evaluate_cost] No jobs to evaluate, skipping.")
         return {"cost_of_living": []}
 
-    results = []
+    location = state.get("location", "Boston")
+
+    async def _eval_one(client: httpx.AsyncClient, job: dict) -> dict:
+        """[ZH] 单个岗位评估 / [EN] Evaluate a single job."""
+        try:
+            resp = await client.post(
+                f"{AGENT_B_URL}/api/v1/evaluate",
+                json={
+                    "job_title": job.get("job_title", ""),
+                    "location": location,
+                    "estimated_salary": job.get("estimated_salary", "Not Specified"),
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return {
+                "company": job.get("company", ""),
+                "job_title": job.get("job_title", ""),
+                "affordability": data.get("affordability", "Unknown"),
+                "monthly_cost_range": data.get("monthly_cost_range", ""),
+                "monthly_surplus_range": data.get("monthly_surplus_range", ""),
+                "ai_comment": data.get("ai_comment", ""),
+            }
+        except Exception as e:
+            logger.warning(f"[Node: evaluate_cost] Failed for {job.get('job_title', '?')}: {e}")
+            return {
+                "company": job.get("company", ""),
+                "job_title": job.get("job_title", ""),
+                "affordability": "Unavailable",
+                "monthly_cost_range": "",
+                "monthly_surplus_range": "",
+                "ai_comment": "",
+            }
+
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            for job in jobs:
-                try:
-                    resp = await client.post(
-                        f"{AGENT_B_URL}/api/v1/evaluate",
-                        json={
-                            "job_title": job.get("job_title", ""),
-                            "location": state.get("location", "Boston"),
-                            "estimated_salary": job.get("estimated_salary", "Not Specified"),
-                        },
-                    )
-                    resp.raise_for_status()
-                    data = resp.json()
-                    results.append({
-                        "company": job.get("company", ""),
-                        "job_title": job.get("job_title", ""),
-                        "affordability": data.get("affordability", "Unknown"),
-                        "monthly_cost_range": data.get("monthly_cost_range", ""),
-                        "monthly_surplus_range": data.get("monthly_surplus_range", ""),
-                        "ai_comment": data.get("ai_comment", ""),
-                    })
-                except Exception as e:
-                    logger.warning(f"[Node: evaluate_cost] Failed for {job.get('job_title', '?')}: {e}")
-                    results.append({
-                        "company": job.get("company", ""),
-                        "job_title": job.get("job_title", ""),
-                        "affordability": "Unavailable",
-                        "monthly_cost_range": "",
-                        "monthly_surplus_range": "",
-                        "ai_comment": "",
-                    })
+        # [ZH] 并发执行所有岗位评估，3 个 job 从 ~6s 降到 ~2s
+        # [EN] Run all evaluations concurrently — 3 jobs goes from ~6s to ~2s
+        async with httpx.AsyncClient(timeout=settings.agent_b_timeout) as client:
+            results = await asyncio.gather(*[_eval_one(client, job) for job in jobs])
         logger.info(f"[Node: evaluate_cost] Evaluated {len(results)} jobs via Agent B.")
-        return {"cost_of_living": results}
+        return {"cost_of_living": list(results)}
     except Exception as e:
         error_msg = f"Agent B (evaluate_cost) failed: {e}"
         logger.error(error_msg)
@@ -309,6 +349,44 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# [ZH] CORS 中间件 / [EN] CORS middleware
+_origins = settings.allowed_origins.split(",")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
+
+
+# [ZH] 请求 ID 中间件：每个请求生成唯一 ID，便于跨服务追踪
+# [EN] Request ID middleware: assigns a unique ID per request for cross-service tracing
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4())[:8])
+    request.state.request_id = request_id
+    logger.info(f"[req={request_id}] {request.method} {request.url.path}")
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+# [ZH] 速率限制：基于 IP / [EN] Rate limiter: IP-based
+_rate_limit = settings.rate_limit
+limiter = Limiter(key_func=get_remote_address, default_limits=[_rate_limit])
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+# [ZH] API Key 鉴权依赖（环境变量 API_KEY 设置时启用）
+# [EN] API key auth (enabled when API_KEY env var is set)
+async def verify_api_key(x_api_key: str = Header(None)):
+    expected = settings.api_key.strip()
+    if not expected:
+        return  # [ZH] 未设置则跳过 / [EN] Skip if not configured
+    if not x_api_key or x_api_key.strip() != expected:
+        raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key header")
+
 
 @app.get("/health", tags=["Ops"])
 async def health():
@@ -322,7 +400,10 @@ async def health():
     tags=["Pipeline"],
     summary="Run the full job scout → resume tips → interview prep pipeline",
 )
-async def run_pipeline(request: PipelineRequest):
+@limiter.limit(_rate_limit)
+async def run_pipeline(request: PipelineRequest, http_request: Request, _: None = None):
+    # [ZH] 鉴权（如果配置了 API_KEY）/ [EN] Verify API key if configured
+    await verify_api_key(http_request.headers.get("x-api-key"))
     """
     [ZH] 执行完整流水线：搜索岗位 → 检索简历建议 → 生成面试题
     [EN] Execute the full pipeline: scout jobs → retrieve tips → generate questions
@@ -355,7 +436,7 @@ async def run_pipeline(request: PipelineRequest):
         )
     except Exception as e:
         logger.error(f"Pipeline failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Pipeline execution failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Pipeline execution failed: {e}") from e
 
 
 if __name__ == "__main__":

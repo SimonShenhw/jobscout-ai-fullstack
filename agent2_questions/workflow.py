@@ -3,9 +3,14 @@ import sys
 import json
 import asyncio
 import logging
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional
+
+# [ZH] 加载 .env 中的环境变量 / [EN] Load environment variables from .env
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 # [ZH] 简历解析依赖
 # [EN] Resume parsing dependencies
@@ -121,7 +126,18 @@ def extract_resume_text(filename: str, data: bytes) -> str:
 # 3. Module-Level LLM + Prompt (initialized once, reused across requests)
 # ==========================================
 
-LLM = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.3)
+# [ZH] LLM 延迟初始化：首次调用时创建，避免 import 阶段缺 API key 而崩溃
+# [EN] Lazy init: create on first call to avoid import-time crash when API key is missing
+_llm = None
+_chain = None
+
+def _get_chain():
+    global _llm, _chain
+    if _chain is None:
+        model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        _llm = ChatGoogleGenerativeAI(model=model_name, temperature=0.3)
+        _chain = PROMPT | _llm.with_structured_output(InterviewPrepResponse)
+    return _chain
 
 PROMPT = ChatPromptTemplate.from_messages([
     (
@@ -151,9 +167,6 @@ Generate the structured output now."""
     ),
 ])
 
-CHAIN = PROMPT | LLM.with_structured_output(InterviewPrepResponse)
-
-
 # ==========================================
 # 4. 核心 Agent 逻辑（每个岗位一个协程，asyncio.gather 并发执行）
 # 4. Core Agent Logic (one coroutine per job, concurrent via asyncio.gather)
@@ -171,7 +184,7 @@ async def generate_questions_for_job(
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            result: InterviewPrepResponse = await CHAIN.ainvoke({
+            result: InterviewPrepResponse = await _get_chain().ainvoke({
                 "company":     job.company,
                 "job_title":   job.job_title,
                 "core_skills": ", ".join(job.core_skills),
@@ -184,7 +197,7 @@ async def generate_questions_for_job(
             if attempt == max_retries - 1:
                 raise Exception(
                     f"LLM failed to generate questions for {job.job_title} @ {job.company} after {max_retries} attempts."
-                )
+                ) from e
             await asyncio.sleep(1)
 
 
@@ -233,6 +246,16 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# [ZH] CORS 中间件 / [EN] CORS middleware
+_origins = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
+
 
 @app.post(
     "/api/v1/prep",
@@ -258,9 +281,9 @@ async def api_generate_interview_questions(
         resume_bytes = await resume.read()
         resume_text = extract_resume_text(resume.filename, resume_bytes)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=422, detail=f"Failed to parse resume: {e}")
+        raise HTTPException(status_code=422, detail=f"Failed to parse resume: {e}") from e
 
     if not resume_text:
         raise HTTPException(status_code=422, detail="Resume appears to be empty or unreadable.")
@@ -272,7 +295,7 @@ async def api_generate_interview_questions(
         raw_jobs = parsed.get("jobs", parsed) if isinstance(parsed, dict) else parsed
         jobs = [JobJD(**j) for j in raw_jobs]
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid jobs_json format: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid jobs_json format: {e}") from e
 
     if not jobs:
         raise HTTPException(status_code=400, detail="No jobs found in jobs_json.")
@@ -282,7 +305,7 @@ async def api_generate_interview_questions(
         response = await run_interview_agent(jobs, resume_text)
         return response
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ==========================================
@@ -309,7 +332,7 @@ async def api_generate_interview_questions_json(request: PrepJsonRequest):
     try:
         jobs = [JobJD(**j) for j in request.jobs]
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid job format: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid job format: {e}") from e
 
     if not jobs:
         raise HTTPException(status_code=400, detail="No jobs provided.")
@@ -318,11 +341,94 @@ async def api_generate_interview_questions_json(request: PrepJsonRequest):
         response = await run_interview_agent(jobs, resume_text)
         return response
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ==========================================
-# 7. 健康检查 / Health Check
+# 7. 面试答题反馈接口 / Interview Answer Feedback
+# ==========================================
+
+class FeedbackRequest(BaseModel):
+    """[ZH] 用户答题反馈请求 / [EN] User answer feedback request."""
+    question: str = Field(description="The interview question being answered")
+    answer: str = Field(description="The user's answer to the question")
+    job_title: str = Field(default="", description="The job title for context")
+    company: str = Field(default="", description="The company name for context")
+
+
+class FeedbackResponse(BaseModel):
+    """[ZH] LLM 反馈响应 / [EN] LLM feedback response."""
+    status: str
+    feedback: str
+    score: int = Field(description="Score 1-10 for the answer quality")
+
+
+_feedback_prompt = ChatPromptTemplate.from_messages([
+    (
+        "system",
+        """You are an experienced interviewer giving constructive feedback on a candidate's answer.
+Provide:
+1. A score from 1-10 (be honest but encouraging).
+2. Specific feedback (2-3 sentences) on what was strong and what could be improved.
+Reference the STAR method, quantifiable metrics, or specific examples if relevant.
+Keep your tone supportive and actionable."""
+    ),
+    (
+        "human",
+        """=== CONTEXT ===
+Position: {job_title} at {company}
+
+=== QUESTION ===
+{question}
+
+=== CANDIDATE'S ANSWER ===
+{answer}
+
+Provide structured feedback now."""
+    ),
+])
+
+_feedback_chain = None
+
+def _get_feedback_chain():
+    global _feedback_chain
+    if _feedback_chain is None:
+        model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        llm = ChatGoogleGenerativeAI(model=model_name, temperature=0.4)
+        _feedback_chain = _feedback_prompt | llm.with_structured_output(FeedbackResponse)
+    return _feedback_chain
+
+
+@app.post(
+    "/api/v1/feedback",
+    response_model=FeedbackResponse,
+    tags=["Interview Prep Agent"],
+    summary="Get LLM feedback on a user's interview answer",
+)
+async def api_feedback(request: FeedbackRequest):
+    """[ZH] 对用户的面试回答给出 AI 反馈 / [EN] Provide AI feedback on a user's interview answer."""
+    if not os.getenv("GOOGLE_API_KEY"):
+        raise HTTPException(status_code=503, detail="Missing GOOGLE_API_KEY")
+
+    try:
+        result = await _get_feedback_chain().ainvoke({
+            "question": request.question,
+            "answer": request.answer,
+            "job_title": request.job_title or "the position",
+            "company": request.company or "the company",
+        })
+        return FeedbackResponse(
+            status="success",
+            feedback=result.feedback,
+            score=result.score,
+        )
+    except Exception as e:
+        logger.error(f"Feedback generation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Feedback generation failed: {e}") from e
+
+
+# ==========================================
+# 8. 健康检查 / Health Check
 # ==========================================
 
 @app.get("/health", tags=["Ops"])

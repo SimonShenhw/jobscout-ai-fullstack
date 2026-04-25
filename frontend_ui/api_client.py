@@ -7,6 +7,9 @@ import time
 # [EN] Service URL — points to Module D orchestrator
 PIPELINE_URL = os.getenv("PIPELINE_URL", "http://127.0.0.1:8082")
 
+# [ZH] Agent 2 直连地址（用于面试反馈）/ [EN] Direct Agent 2 URL (for interview feedback)
+AGENT2_URL = os.getenv("AGENT2_URL", "http://127.0.0.1:8081")
+
 # [ZH] 重试设置 / [EN] Retry settings
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # [ZH] 秒 / [EN] seconds
@@ -127,6 +130,43 @@ def run_pipeline(location: str, keywords: str, num_results: int, resume_text: st
     }
 
 
+def get_interview_feedback(question: str, answer: str, job_title: str = "", company: str = "") -> dict:
+    """
+    [ZH] 调用 Agent 2 的反馈接口，返回 LLM 生成的面试答题反馈。
+    [EN] Call Agent 2 feedback endpoint, return LLM-generated answer feedback.
+    """
+    try:
+        response = requests.post(
+            f"{AGENT2_URL}/api/v1/feedback",
+            json={
+                "question": question,
+                "answer": answer,
+                "job_title": job_title,
+                "company": company,
+            },
+            timeout=30,
+        )
+        if response.status_code == 200:
+            data = response.json()
+            return {
+                "status": "success",
+                "feedback": data.get("feedback", ""),
+                "score": data.get("score", 0),
+            }
+    except Exception:
+        pass
+
+    # [ZH] 服务不可达时回退到通用反馈 / [EN] Fall back to generic feedback if unreachable
+    return {
+        "status": "fallback",
+        "feedback": (
+            "Great answer! Think about how you could add a specific example "
+            "with measurable results to make it even stronger."
+        ),
+        "score": 7,
+    }
+
+
 # ==============================================
 # [ZH] 开发用演示数据（API 上线后可移除）
 # [EN] Mock data for development (remove when APIs are live)
@@ -202,6 +242,21 @@ def _mock_pipeline_response(num_results: int) -> dict:
             ],
         })
 
+    # [ZH] 模拟生活成本评估 / [EN] Mock cost of living evaluations
+    mock_cost_of_living = []
+    for job in mock_jobs[:num_results]:
+        mock_cost_of_living.append({
+            "company": job["company"],
+            "job_title": job["job_title"],
+            "affordability": "🟢 Comfortable",
+            "monthly_cost_range": "$2,890 - $3,690 / mo",
+            "monthly_surplus_range": "$1,200 - $2,800 / mo",
+            "ai_comment": (
+                f"This {job['job_title']} role in Boston offers a comfortable "
+                "financial outlook for an internship-level position."
+            ),
+        })
+
     return {
         "status": "success",
         "jobs": mock_jobs[:num_results],
@@ -210,5 +265,6 @@ def _mock_pipeline_response(num_results: int) -> dict:
             "Highlight experience with AI/ML frameworks and cloud deployment.",
         ],
         "interview_prep": mock_interview_prep,
+        "cost_of_living": mock_cost_of_living,
         "errors": [],
     }

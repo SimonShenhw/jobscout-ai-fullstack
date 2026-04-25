@@ -8,6 +8,7 @@ from copy import deepcopy
 from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -91,7 +92,10 @@ _search_tool = None
 def get_llm():
     global _llm
     if _llm is None:
-        _llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", temperature=0.0)
+        # [ZH] 统一使用 gemini-2.5-flash（稳定版本）
+        # [EN] Use gemini-2.5-flash (stable version) for all agents
+        model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        _llm = ChatGoogleGenerativeAI(model=model_name, temperature=0.0)
     return _llm
 
 def get_search_tool():
@@ -130,7 +134,7 @@ async def run_scout_agent(request: ScoutRequest) -> ScoutResponse:
         raw_search_results = "\n\n---\n\n".join(formatted_results)
 
     except Exception as e:
-        raise Exception(f"SerpAPI call failed: {str(e)}")
+        raise Exception(f"SerpAPI call failed: {str(e)}") from e
 
     # [ZH] 搜索结果为空时直接返回，不要喂空数据给 LLM 产生幻觉
     # [EN] If no search results, return early instead of feeding empty data to LLM
@@ -162,7 +166,7 @@ async def run_scout_agent(request: ScoutRequest) -> ScoutResponse:
                 "raw_data": raw_search_results
             })
         except Exception as e2:
-            raise Exception(f"LLM failed after 2 attempts. Last error: {e2}")
+            raise Exception(f"LLM failed after 2 attempts. Last error: {e2}") from e2
 
 
 # ==========================================
@@ -174,6 +178,17 @@ app = FastAPI(
     title="Job Scout Agent API",
     description="MIT NANDA Sandbox Project - Group 1. Lightning Fast Edition with Caching & Telemetry.",
     version="2.3.0"
+)
+
+# [ZH] CORS 中间件：允许指定来源访问（生产环境通过 ALLOWED_ORIGINS 配置）
+# [EN] CORS middleware: allow specified origins (configure via ALLOWED_ORIGINS in prod)
+_origins = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
 )
 
 # ==========================================
@@ -227,11 +242,11 @@ async def api_scout_jobs(request: ScoutRequest):
 
     except ValueError as e:
         # [ZH] API Key 缺失等配置错误 / [EN] Config errors like missing API keys
-        raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=503, detail=str(e)) from e
     except Exception as e:
         elapsed = time.time() - start_time
         logger.error(f"[TASK FAILED] Error after {elapsed:.2f}s: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 if __name__ == "__main__":
     import uvicorn

@@ -41,7 +41,10 @@ Module D orchestrates the full pipeline: **Agent 1** runs first, then **Module A
 - **Resume Upload** — PDF/TXT parsing for personalized question generation
 - **Caching** — 10-min TTL cache on Agent 1 to save API quota on repeated searches
 - **Cost of Living** — Agent B evaluates salary affordability per city (Comfortable / Moderate / Tight)
+- **AI Interview Coach** — Submit answers and receive LLM-generated feedback with a 1-10 score
 - **Demo Mode** — Frontend falls back to mock data when backends are unavailable
+- **Production Ready** — CORS, API key auth, rate limiting, structured logging with request IDs
+- **Linode Deployment** — See `docs/DEPLOY_LINODE.md` for HTTPS deployment with Caddy
 
 ### Quick Start
 

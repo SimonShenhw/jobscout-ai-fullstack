@@ -28,10 +28,14 @@ start "Module A - VectorDB" cmd /k "cd /d %~dp0module_a_vectordb && python -m uv
 echo [5/6] Starting Module D (LangGraph Orchestrator) on port 8082...
 start "Module D - LangGraph" cmd /k "cd /d %~dp0module_d_langgraph && set GOOGLE_API_KEY=%GOOGLE_API_KEY% && set SERPAPI_API_KEY=%SERPAPI_API_KEY% && python master_graph.py"
 
-:: Wait for backends to initialize
+:: Poll backends until ready (up to 90s for Module A which loads ML model)
 echo.
-echo Waiting for backends to start...
-timeout /t 10 /nobreak >nul
+echo Waiting for backends to start (polling /health endpoints)...
+call :wait_for_health 8080 "Agent 1"
+call :wait_for_health 8081 "Agent 2"
+call :wait_for_health 8083 "Agent B"
+call :wait_for_health 8000 "Module A"
+call :wait_for_health 8082 "Module D"
 
 echo [6/6] Starting Frontend UI on port 8501...
 start "Frontend UI" cmd /k "cd /d %~dp0frontend_ui && python -m streamlit run app.py --server.port 8501"
@@ -64,3 +68,26 @@ for %%P in (8080 8081 8083 8000 8082 8501) do (
 )
 
 echo [OK] All services stopped.
+goto :eof
+
+:: =====================================================
+:: [ZH] 健康检查轮询函数 / [EN] Health check polling function
+:: Usage: call :wait_for_health <port> <service_name>
+:: =====================================================
+:wait_for_health
+set "PORT=%~1"
+set "NAME=%~2"
+set /a "ATTEMPTS=0"
+:wait_loop
+set /a "ATTEMPTS+=1"
+if %ATTEMPTS% GTR 45 (
+    echo   [WARN] %NAME% on port %PORT% not responding after 90s, continuing anyway...
+    goto :eof
+)
+powershell -Command "try { (Invoke-WebRequest -Uri 'http://localhost:%PORT%/health' -TimeoutSec 2 -UseBasicParsing).StatusCode } catch { exit 1 }" >nul 2>&1
+if errorlevel 1 (
+    timeout /t 2 /nobreak >nul
+    goto wait_loop
+)
+echo   [OK] %NAME% ready on port %PORT%.
+goto :eof

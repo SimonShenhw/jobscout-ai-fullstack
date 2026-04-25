@@ -1,0 +1,27 @@
+# [ZH] Caddy 反向代理配置（部署 Linode 时使用）
+# [EN] Caddy reverse proxy config (use when deploying to Linode)
+#
+# [ZH] 复制为 Caddyfile 并替换 yourdomain.com
+# [EN] Copy to Caddyfile and replace yourdomain.com
+
+yourdomain.com {
+    # [ZH] 前端 / [EN] Frontend
+    reverse_proxy frontend:8501
+
+    # [ZH] Module D API（唯一对外暴露的 API）
+    # [EN] Module D API (only API exposed publicly)
+    handle /api/* {
+        reverse_proxy module-d:8082
+    }
+
+    # [ZH] 安全 headers / [EN] Security headers
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    }
+
+    # [ZH] 启用 gzip 压缩 / [EN] Enable gzip compression
+    encode gzip
+}

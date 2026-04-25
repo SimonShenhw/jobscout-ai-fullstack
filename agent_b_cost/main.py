@@ -11,7 +11,9 @@ Wraps Agent B's core logic into HTTP endpoints, running on port 8083.
   GET  /health           — 健康检查 / Health check
 """
 
+import os
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Optional
 from agent import evaluate_job
@@ -31,6 +33,16 @@ app = FastAPI(
         "Called by Agent A (Job Scout) to enrich job listings."
     ),
     version="1.0.0",
+)
+
+# [ZH] CORS 中间件 / [EN] CORS middleware
+_origins = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
 )
 
 

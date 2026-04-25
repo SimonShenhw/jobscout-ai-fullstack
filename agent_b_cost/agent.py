@@ -10,18 +10,25 @@ living costs, uses Gemini to generate analysis, and returns results.
 """
 
 import os
+import asyncio
 from dotenv import load_dotenv
-import google.generativeai as genai
+from langchain_google_genai import ChatGoogleGenerativeAI
 from tools import parse_salary, get_cost_of_living
 
-# 加载 .env 文件中的 API Key
-# Load API Key from .env file
+# [ZH] 加载 .env / [EN] Load .env (search both module dir and parent)
 load_dotenv()
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
-# 初始化 Gemini 模型（只初始化一次，节省资源）
-# Initialize Gemini model once to save resources
-model = genai.GenerativeModel("gemini-2.0-flash")
+# [ZH] 延迟初始化 LLM，避免 import 时缺 API Key 崩溃
+# [EN] Lazy init LLM to avoid import-time crash when API key is missing
+_llm = None
+
+def _get_llm():
+    global _llm
+    if _llm is None:
+        model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        _llm = ChatGoogleGenerativeAI(model=model_name, temperature=0.3)
+    return _llm
 
 
 # ============================================================
@@ -164,11 +171,10 @@ Financial status: {affordability}
 Write only the one sentence. No bullet points. No extra explanation.
 """
     try:
-        response = model.generate_content(prompt)
-        ai_comment = response.text.strip()
+        response = await _get_llm().ainvoke(prompt)
+        ai_comment = response.content.strip() if hasattr(response, "content") else str(response).strip()
     except Exception:
-        # Gemini 调用失败时用默认评语
-        # Use a default comment if Gemini call fails
+        # [ZH] Gemini 调用失败时用默认评语 / [EN] Use default comment if Gemini call fails
         ai_comment = f"This {job_title} role in {city} offers a {affordability.split()[-1].lower()} financial outlook."
 
     # 第七步：组装最终返回结果

@@ -10,9 +10,11 @@ loader = TextLoader("resume_tips.txt", encoding="utf-8")
 documents = loader.load()
 
 # [ZH] 2. 将文本切割为小块，便于向量化检索
-# [EN] 2. Split text into small chunks for vector retrieval
+#      chunk_size=350 让每条 tip（约 200-300 字符）保持完整，overlap=50 保证上下文连贯
+# [EN] 2. Split text into chunks. chunk_size=350 keeps each tip (~200-300 chars) intact;
+#      overlap=50 preserves context between chunks
 print("2. 正在切割文本 / Splitting text into chunks...")
-text_splitter = RecursiveCharacterTextSplitter(chunk_size=200, chunk_overlap=20)
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=350, chunk_overlap=50)
 docs = text_splitter.split_documents(documents)
 
 # [ZH] 3. 使用 SentenceTransformer 生成向量，存入 ChromaDB
